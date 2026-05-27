@@ -1,0 +1,442 @@
+% ATR Paper — INTERSPEECH 2027 target
+% Authors: Ifeanyi Dike, Happy Nkanta Monday
+\documentclass[a4paper]{article}
+
+\usepackage{INTERSPEECH2025}   % replace with correct template when submitting
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{url}
+\usepackage{hyperref}
+
+\title{ATR: An Acoustic Turn-over Rate Metric for Evaluating\\
+       Overlap Handling in Full-Duplex Spoken Dialogue Systems}
+
+\name{Ifeanyi Dike$^1$, Happy Nkanta Monday$^2$}
+
+\address{
+  $^1$Datastrut AI \\
+  $^2$[Happy's affiliation]
+}
+
+\email{ifeanyi@datastrut.ai, [Happy's email]}
+
+\begin{document}
+
+\maketitle
+
+%=============================================================================
+\begin{abstract}
+Turn-over Rate (TOR), introduced in Full-Duplex-Bench, measures how often a
+full-duplex spoken dialogue model yields the speaking floor during overlapping
+speech. TOR is computed from ASR transcripts, and this dependency turns out to
+matter: two widely-used ASR backends produce TOR estimates that diverge by up
+to 23.5 percentage points on the same audio, making cross-study comparisons
+unreliable. We propose the Acoustic Turn-over Rate (ATR), which replaces the
+ASR step with voice activity detection. ATR asks the same question --- did the
+model's audio fall silent before the overlap window closed? --- but answers it
+directly from the waveform, without transcription. Evaluated on Moshi across
+all four Full-Duplex-Bench v1.5 scenarios, three independent VAD backends
+(Silero, WebRTC, pyannote) agree within 7.6 percentage points on
+\emph{user\_interruption}, roughly three times more consistent than ASR-based
+TOR on the same audio. ATR requires no language model, runs locally, and is
+language-agnostic, making it a practical and more reproducible alternative for
+benchmarking full-duplex speech systems.
+\end{abstract}
+
+\noindent\textbf{Index Terms:} full-duplex dialogue, turn-taking evaluation,
+voice activity detection, spoken dialogue systems, overlap handling
+
+%=============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Voice has always been the most natural interface for conversation. The appeal
+of full-duplex spoken dialogue systems is obvious --- they listen and speak
+simultaneously, the way people do. But this also means they have to decide, in
+real time, whether to keep talking when someone else starts. That decision is
+the hard part, and measuring how well a system makes it turns out to be
+harder than it looks.
+
+Full-Duplex-Bench~\cite{lin2025fullduplex} proposed TOR --- Turn-over Rate ---
+as a way to quantify floor-yielding behaviour. The metric is straightforward:
+for each test clip, did the model stop speaking before the user's overlap
+window closed? Average across clips and you get a number between 0 and 1.
+Clean idea. The issue is that figuring out ``when the model stopped speaking''
+is not as simple as it sounds. TOR answers this by running ASR on the model's
+audio output and taking the timestamp of the last recognised word --- which
+means the evaluation result depends on which ASR system you picked. And
+systems disagree, sometimes by a lot.
+
+We ran two standard ASR backends on the same Moshi~\cite{defossez2024moshi}
+outputs across all four Full-Duplex-Bench v1.5~\cite{lin2025fullduplexv15}
+scenarios. On \emph{user\_backchannel}, MLX Whisper gave TOR~$= 0.44$;
+AssemblyAI gave $0.20$. Same audio, 23.5 percentage point gap. On
+\emph{talking\_to\_other}, the difference was 22 points. This is not a corner
+case --- it is what happens every time someone replicate an experiment with a
+different ASR system.
+
+The fix we propose is to skip ASR altogether. ATR --- Acoustic Turn-over Rate
+--- asks the same question as TOR but uses voice activity detection instead of
+transcription. When did the model's audio go silent? VAD answers that without
+needing a vocabulary, a language model, or a transcription server. We tested
+three VAD backends on the same clips: Silero~\cite{silero2021},
+WebRTC~\cite{webrtcvad}, and pyannote~\cite{plaquet2023,bredin2020}. They
+disagreed by at most 7.6 percentage points on \emph{user\_interruption}, and
+14.7 points in the worst case across all tasks --- two to three times more
+stable than ASR, consistently.
+
+%=============================================================================
+\section{Background}
+\label{sec:background}
+
+\subsection{Turn-taking in spoken dialogue}
+
+Human conversation is not a strict alternation of speaker turns. Overlapping
+speech --- interruptions, backchannels, simultaneous starts --- accounts for
+roughly 10 to 20\% of spoken time~\cite{defossez2024moshi}, and managing it
+gracefully is one of the things that makes a conversation feel natural rather
+than mechanical~\cite{sacks1974,skantze2021}. Early voice assistants sidestepped
+the problem with push-to-talk and endpointing; full-duplex systems attempt to
+handle it continuously.
+
+\subsection{Full-Duplex-Bench}
+
+Full-Duplex-Bench~\cite{lin2025fullduplex} (FDB) is a systematic evaluation
+framework for full-duplex spoken dialogue models, assessing four overlap
+scenarios: \emph{user interruption} (the user takes the floor while the model
+is speaking), \emph{user backchannel} (the user produces a short acknowledgement
+without claiming the floor), \emph{talking to others} (the user addresses
+a third party), and \emph{background speech} (ambient speech not directed at
+the model). For each scenario, the benchmark supplies audio stimuli and
+reference timestamps marking the start and end of the overlap window.
+
+FDB v1.0~\cite{lin2025fullduplex} computes TOR from ASR transcripts generated
+by NVIDIA Parakeet-TDT-0.6B-v2. FDB v1.5~\cite{lin2025fullduplexv15}
+(accepted at ICASSP 2026) drops TOR entirely and replaces it with stop and
+response latency alongside categorical behaviour labels assigned by GPT-4o.
+The shift away from TOR in v1.5 is suggestive; our experiments offer an
+empirical explanation for why.
+
+\subsection{ASR variance in spoken language evaluation}
+
+The sensitivity of downstream metrics to ASR system choice is not a new
+observation. Word error rates differ substantially across systems on the same
+audio~\cite{radford2023whisper}, and word-level timestamp accuracy varies
+further. When a metric is derived from ASR timestamps, it inherits this
+variance. What has not been quantified before is how large this effect is
+specifically for overlap-handling evaluation --- and whether a transcript-free
+alternative can do better.
+
+%=============================================================================
+\section{TOR and Its ASR Dependence}
+\label{sec:tor}
+
+\subsection{Definition}
+
+Following~\cite{lin2025fullduplex}, TOR is:
+\begin{equation}
+    \text{TOR} = \frac{1}{N} \sum_{i=1}^{N}
+    \mathbf{1}\!\left[t^{\text{asr}}_i \leq t^{\text{ref}}_i\right]
+    \label{eq:tor}
+\end{equation}
+where $t^{\text{asr}}_i$ is the end timestamp of the last ASR-recognised word
+in sample $i$'s model output, and $t^{\text{ref}}_i$ is the end of the overlap
+window from the benchmark metadata. TOR~$= 1$ means the model always yielded
+the floor before the window closed; TOR~$= 0$ means it never did.
+
+\subsection{Sensitivity to ASR choice}
+
+We computed TOR for Moshi on Full-Duplex-Bench v1.5 using two backends:
+\begin{itemize}
+    \item \textbf{MLX Whisper} --- \texttt{mlx-community/whisper-large-v3-mlx},
+          a Metal-accelerated port of Whisper large-v3~\cite{radford2023whisper}
+          running locally on Apple Silicon.
+    \item \textbf{AssemblyAI} --- Universal-1~\cite{assemblyai2024}, a
+          commercial ASR API with word-level timestamp support.
+\end{itemize}
+
+\begin{table}[t]
+  \centering
+  \caption{TOR from two ASR backends on Moshi outputs. $\Delta$ is the
+           absolute difference. $n$ is the number of samples with a
+           non-empty transcript.}
+  \label{tab:asr_sensitivity}
+  \begin{tabular}{lcccc}
+    \toprule
+    Scenario & $n_{\text{MLX}}$ & MLX & AAI & $\Delta$ \\
+    \midrule
+    user\_interruption   & 196 & 0.000 & 0.000 & 0.000 \\
+    user\_backchannel    &  98 & 0.439 & 0.204 & \textbf{0.235} \\
+    talking\_to\_other   & 100 & 0.360 & 0.140 & \textbf{0.220} \\
+    background\_speech   & 100 & 0.310 & 0.140 & \textbf{0.170} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Results are in Table~\ref{tab:asr_sensitivity}. Three of four scenarios show
+17--23.5 percentage point gaps between the two backends on the same audio.
+The \emph{user\_interruption} case looks stable at first glance --- both
+systems return TOR~$= 0$ --- but only because both agree on a floor value.
+AssemblyAI returned an empty transcript for 108 of 200
+\emph{user\_interruption} samples (54\%), because those clips contain
+near-silence after the interruption endpoint and the API produces no output.
+A different system might handle near-silent audio differently, pushing that
+zero in either direction.
+
+The core issue is structural. ASR systems apply different confidence thresholds,
+post-processing pipelines, and endpointing heuristics. A word near the end of
+an utterance that one system transcribes, another may discard. That one word
+can shift $t^{\text{asr}}_i$ enough to flip the binary indicator in
+Equation~\ref{eq:tor}, and those flips accumulate into the large gaps
+observed in Table~\ref{tab:asr_sensitivity}.
+
+%=============================================================================
+\section{Acoustic Turn-over Rate (ATR)}
+\label{sec:atr}
+
+\subsection{Definition}
+
+ATR replaces $t^{\text{asr}}_i$ in Equation~\ref{eq:tor} with a VAD-based
+estimate of the last speech end:
+\begin{equation}
+    \text{ATR} = \frac{1}{N} \sum_{i=1}^{N}
+    \mathbf{1}\!\left[t^{\text{vad}}_i \leq t^{\text{ref}}_i\right]
+    \label{eq:atr}
+\end{equation}
+where $t^{\text{vad}}_i$ is the end of the last VAD-detected speech segment
+in sample $i$'s model output. Everything else --- the reference timestamps,
+the binary indicator, the average --- stays the same as TOR.
+
+\subsection{VAD post-processing}
+
+For each model output audio file we:
+\begin{enumerate}
+    \item Resample to 16~kHz (required by all three VAD backends).
+    \item Run the VAD to get a list of $(t_{\text{start}}, t_{\text{end}})$
+          speech segment pairs.
+    \item Merge adjacent segments separated by $\leq 300$~ms.
+    \item Set $t^{\text{vad}}_i$ to the end of the last merged segment.
+          Samples with no detected speech are excluded from the ATR computation
+          and counted separately as a speech-absence rate.
+\end{enumerate}
+
+The 300~ms merge threshold follows standard VAD post-processing
+practice and is the same across all three backends for comparability.
+
+%=============================================================================
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Setup}
+
+\paragraph{Benchmark.}
+We use Full-Duplex-Bench v1.5~\cite{lin2025fullduplexv15}, which provides
+498 audio stimuli across four scenarios: \emph{user\_interruption} (200),
+\emph{user\_backchannel} (98), \emph{talking\_to\_other} (100), and
+\emph{background\_speech} (100).
+
+\paragraph{Model.}
+We evaluate \textbf{Moshi}~\cite{defossez2024moshi}
+(\texttt{kyutai/moshiko-mlx-bf16}), a real-time full-duplex speech model
+built on a multi-stream language model with a neural audio codec.
+We run inference offline using the \texttt{moshi\_mlx} Python API and
+\texttt{rustymimi} StreamTokenizer, bypassing the WebSocket server entirely.
+This produces 498 audio output files, all confirmed non-silent.
+
+\paragraph{VAD backends.}
+\begin{itemize}
+    \item \textbf{Silero VAD}~\cite{silero2021} --- a lightweight LSTM-based
+          VAD pre-trained on multilingual speech data.
+    \item \textbf{WebRTC VAD}~\cite{webrtcvad} --- a GMM-based VAD from the
+          WebRTC open-source project, using 30~ms frames at aggressiveness
+          level~2.
+    \item \textbf{pyannote segmentation-3.0}~\cite{plaquet2023,bredin2020}
+          --- a transformer-based segmentation model wrapped in a
+          \texttt{VoiceActivityDetection} pipeline with default
+          \texttt{min\_duration\_on} and \texttt{min\_duration\_off} set
+          to 0.
+\end{itemize}
+
+All three backends receive 16~kHz mono audio and use the same 300~ms
+merge threshold described in Section~\ref{sec:atr}.
+
+\subsection{ATR stability across VAD backends}
+
+\begin{table}[t]
+  \centering
+  \caption{ATR from three VAD backends on Moshi outputs. $n$ is the number
+           of samples with detected speech (varies by backend). Max~$\Delta$
+           is the largest pairwise absolute difference across the three backends.}
+  \label{tab:vad_variance}
+  \begin{tabular}{lccccc}
+    \toprule
+    Scenario & $n$ & Silero & WebRTC & pyannote & Max~$\Delta$ \\
+    \midrule
+    user\_interruption  & 166--193 & 0.385 & 0.427 & 0.461 & \textbf{0.076} \\
+    user\_backchannel   &  78--92  & 0.269 & 0.326 & 0.315 & \textbf{0.057} \\
+    talking\_to\_other  &  72--93  & 0.389 & 0.516 & 0.500 & \textbf{0.127} \\
+    background\_speech  &  59--86  & 0.458 & 0.605 & 0.588 & \textbf{0.147} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Table~\ref{tab:vad_variance} shows ATR for each backend. The variation across
+the three systems is small relative to the ASR gap in
+Table~\ref{tab:asr_sensitivity}. On \emph{user\_interruption}, where TOR is
+most directly interpretable, the three VAD backends span a range of 7.6 pp ---
+compared to a 23.5 pp gap between the two ASR systems on the same audio.
+\emph{user\_backchannel} is similarly tight at 5.7 pp versus 23.5 pp.
+
+The largest VAD disagreement is on \emph{background\_speech} (14.7~pp). This
+is also the noisiest scenario --- ambient speech overlapping the model output
+--- and VAD systems are known to differ more on non-speech noise than on clean
+voiced speech. Even here, the VAD range remains smaller than the ASR gap on
+\emph{talking\_to\_other} (22~pp) and \emph{user\_backchannel} (23.5~pp).
+
+\begin{table}[t]
+  \centering
+  \caption{Maximum pairwise backend disagreement: ATR (three VAD systems)
+           versus TOR (two ASR systems) on the same Moshi outputs.}
+  \label{tab:comparison}
+  \begin{tabular}{lcc}
+    \toprule
+    Scenario & TOR Max~$\Delta$ & ATR Max~$\Delta$ \\
+    \midrule
+    user\_interruption  & $0.000^{\dagger}$ & \textbf{0.076} \\
+    user\_backchannel   & 0.235             & \textbf{0.057} \\
+    talking\_to\_other  & 0.220             & \textbf{0.127} \\
+    background\_speech  & 0.170             & \textbf{0.147} \\
+    \bottomrule
+  \end{tabular}
+  {\small $^{\dagger}$Both ASR systems return TOR~$= 0$, but AssemblyAI
+  produced empty transcripts for 54\% of samples in this scenario.}
+\end{table}
+
+Table~\ref{tab:comparison} puts the two metrics side by side. ATR is more
+stable than TOR in three of four scenarios. The one apparent exception ---
+\emph{user\_interruption} --- is where TOR happens to agree at zero, not
+because the metric is stable but because Moshi genuinely does not yield the
+floor on this task, and both ASR systems independently confirm it by
+returning near-zero transcripts.
+
+\subsection{Moshi ATR summary}
+
+\begin{table}[t]
+  \centering
+  \caption{Moshi ATR (Silero VAD) on Full-Duplex-Bench v1.5 across all
+           four overlap scenarios.}
+  \label{tab:moshi_atr}
+  \begin{tabular}{lcc}
+    \toprule
+    Scenario & ATR (Silero) & $n$ \\
+    \midrule
+    user\_interruption  & 0.385 & 166 \\
+    user\_backchannel   & 0.269 &  78 \\
+    talking\_to\_other  & 0.389 &  72 \\
+    background\_speech  & 0.458 &  59 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Moshi yields the floor in roughly 38.5\% of \emph{user\_interruption} scenarios
+as measured by ATR, suggesting a partial floor-holding tendency consistent
+with the behaviour reported for Moshi in~\cite{lin2025fullduplexv15}.
+ATR values on the non-interruption scenarios (0.27--0.46) reflect cases where
+the model continued or resumed speech after the overlap window, which is the
+correct behaviour for backchannels and third-party speech --- though ATR alone
+cannot distinguish between these cases without additional context. Pairing ATR
+with the categorical behaviour labels from FDB v1.5 gives a more complete
+picture.
+
+%=============================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Why VAD is more stable than ASR here}
+
+ASR systems make lexical decisions. A word at the tail of an utterance --- often
+short, spoken at lower energy as the model winds down --- sits right at the
+confidence boundary. One system transcribes it; another discards it. That
+one-word difference shifts $t^{\text{asr}}_i$ by hundreds of milliseconds and
+can flip the binary indicator in Equation~\ref{eq:tor}. Multiplied across a
+dataset, these flips produce the gaps in Table~\ref{tab:asr_sensitivity}.
+
+VAD systems do not have this problem because they do not make word-level
+decisions. They classify frames as voiced or unvoiced based on acoustic
+features, and the three systems we tested use quite different approaches ---
+an LSTM, a GMM, and a transformer. That they agree as closely as they do
+suggests the acoustic signal itself is informative for this task, and that
+the disagreement in ASR-based TOR is mostly an artefact of the transcription
+step rather than genuine ambiguity in the audio.
+
+\subsection{ATR vs TOR: what they actually measure}
+
+There is a real difference between asking ``when did the model's last word
+end'' and ``when did the model's audio go silent.'' Trailing sounds ---
+residual codec noise, unvoiced fricatives, breathing --- can push
+$t^{\text{vad}}_i$ slightly later than $t^{\text{asr}}_i$. In most cases
+this is harmless, but on clips where the overlap window is short, it could
+flip a sample from ATR~$= 1$ to ATR~$= 0$.
+
+Arguably, ATR is the more valid measure from a perceptual standpoint. A listener
+perceives a model as having stopped when the audio falls silent, not when its
+last transcribed word ended. Whether this aligns with human judgements of
+natural floor-yielding is an empirical question. We are conducting a human
+annotation study to investigate this, and will report results in a subsequent
+version of this work.
+
+\subsection{Limitations}
+
+ATR cannot distinguish between a model that yields the floor intentionally
+and one that simply produces no output. A model that fails to generate any
+speech will score ATR~$= 1$ by default, which inflates its apparent
+floor-yielding rate. Reporting a speech-presence rate alongside ATR addresses
+this: if only 30\% of samples contain any detected speech, an ATR of 0.9 means
+something very different than if 95\% do.
+
+VAD systems are also not uniformly accurate across audio conditions. On noisy
+scenarios like \emph{background\_speech}, we observed 14.7 pp disagreement
+across backends --- still smaller than the ASR gap, but not negligible. Users
+should select a VAD backend appropriate to their audio conditions and report
+which one they used.
+
+Finally, the VAD coverage varies across backends (Table~\ref{tab:vad_variance}
+shows $n$ ranging from 59 to 193 depending on backend and scenario), because
+systems differ in their sensitivity to low-energy or short speech segments.
+This affects the denominator of ATR and should be reported alongside the rate.
+
+%=============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+TOR is a reasonable metric with a fragile implementation. Tying it to ASR
+transcripts introduces variance that has nothing to do with how good a model
+is at yielding the floor. Two standard ASR systems disagree by up to 23.5
+percentage points on the same audio --- enough to change the story a paper
+tells about a model's behaviour.
+
+ATR keeps the same intuition as TOR and swaps the ASR step for VAD. Three
+independent VAD backends agree within 7.6 pp on \emph{user\_interruption}
+and within 14.7 pp across all scenarios. It runs locally, requires no
+transcription, and works on any language. We are not arguing that VAD is
+perfect, or that ATR captures everything TOR does. But for the specific
+question of whether the model's audio fell silent before the overlap window
+closed, VAD gives a more stable answer than ASR --- and stability is what
+you need when comparing systems across labs and papers.
+
+Code and evaluation scripts are available at:
+\url{https://github.com/ifeanyidike/full-duplex-bench-atr}
+
+%=============================================================================
+\section{Acknowledgements}
+
+We thank Guan-Ting Lin for making Full-Duplex-Bench publicly available.
+% To be completed.
+
+%=============================================================================
+\bibliographystyle{IEEEtran}
+\bibliography{atr_refs}
+
+\end{document}
