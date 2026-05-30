@@ -27,14 +27,11 @@ import torchaudio
 import webrtcvad
 import struct
 from pathlib import Path
-from glob import glob
 from typing import Optional
-from scipy import stats
 
 # ── Constants ───────────────────────────────────────────────────────────────
 SR_VAD = 16_000
 MERGE_GAP = 0.3
-DATA_ROOT = Path("/Users/ifeanyidike/Public/research/data/v1.5")
 TASKS = ["user_interruption", "user_backchannel", "talking_to_other", "background_speech"]
 
 # ── Audio loading ────────────────────────────────────────────────────────────
@@ -85,12 +82,12 @@ _pyannote_pipeline = None
 def _get_pyannote():
     global _pyannote_pipeline
     if _pyannote_pipeline is None:
-        import os
         from pyannote.audio import Model
         from pyannote.audio.pipelines import VoiceActivityDetection
-        token = open(os.path.expanduser("~/.cache/huggingface/token")).read().strip()
+        from huggingface_hub import HfFolder
+        token = HfFolder.get_token()
         model = Model.from_pretrained(
-            "pyannote/segmentation-3.0", revision="main", token=token
+            "pyannote/segmentation-3.0", revision="main", use_auth_token=token
         )
         pipeline = VoiceActivityDetection(segmentation=model)
         pipeline.instantiate({"min_duration_on": 0.0, "min_duration_off": 0.0})
@@ -207,6 +204,18 @@ def compute_vad_tors(task_dir: Path, task: str) -> dict:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="VAD variance analysis across backends.")
+    parser.add_argument(
+        "--data_root", type=str, required=True,
+        help="Path to the v1.5 data root containing task subdirectories."
+    )
+    parser.add_argument(
+        "--output", type=str, default="results_vad_variance.json",
+        help="Output JSON file path (default: results_vad_variance.json)."
+    )
+    args = parser.parse_args()
+    data_root = Path(args.data_root)
+
     print("Loading Silero VAD (cached)...")
     _get_silero()
     print("Loading pyannote segmentation-3.0...")
@@ -214,8 +223,9 @@ def main():
 
     all_results = {}
     for task in TASKS:
-        task_dir = DATA_ROOT / task
+        task_dir = data_root / task
         if not task_dir.exists():
+            print(f"[SKIP] {task} — directory not found")
             continue
         print(f"\n[EVAL] {task}")
         result = compute_vad_tors(task_dir, task)
@@ -226,7 +236,7 @@ def main():
             else:
                 print(f"  {backend:12s}: {stats_d}")
 
-    output_path = Path(__file__).parent / "results_vad_variance.json"
+    output_path = Path(__file__).parent / args.output
     with open(output_path, "w") as f:
         json.dump(all_results, f, indent=2)
     print(f"\nResults saved to {output_path}")

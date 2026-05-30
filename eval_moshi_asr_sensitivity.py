@@ -180,8 +180,8 @@ def eval_task(task_dir: Path, task: str) -> dict:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", type=str,
-                        default="/Users/ifeanyidike/Public/research/data/v1.5")
+    parser.add_argument("--data_root", type=str, required=True,
+                        help="Path to the v1.5 data root containing task subdirectories.")
     parser.add_argument("--output", type=str,
                         default="results_moshi_asr_sensitivity.json")
     args = parser.parse_args()
